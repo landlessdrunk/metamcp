@@ -91,6 +91,9 @@ export class MetaMcpServerPool {
   ): Promise<MetaMcpServerInstance | undefined> {
     // Check if we already have an active server for this sessionId
     if (this.activeServers[sessionId]) {
+      // Touch timestamp on every access so the configured lifetime acts as
+      // an idle timeout, not a hard TTL from creation (mirrors mcp-server-pool.ts).
+      this.sessionTimestamps[sessionId] = Date.now();
       return this.activeServers[sessionId];
     }
 
@@ -328,6 +331,18 @@ export class MetaMcpServerPool {
   }
 
   /**
+   * Touch a session's timestamp without altering anything else. Used by
+   * callers (e.g. the public StreamableHTTP/SSE routers) that look up an
+   * existing session's transport via a different session store and need to
+   * keep this pool's idle-timeout clock in sync with that access.
+   */
+  touchSession(sessionId: string): void {
+    if (this.sessionTimestamps[sessionId] !== undefined) {
+      this.sessionTimestamps[sessionId] = Date.now();
+    }
+  }
+
+  /**
    * Cleanup a session by sessionId
    */
   async cleanupSession(sessionId: string): Promise<void> {
@@ -338,8 +353,17 @@ export class MetaMcpServerPool {
 
     clearAdminToolsContext(activeServer.internalSessionId);
 
-    // Cleanup the MetaMCP server
-    await activeServer.cleanup();
+    // Cleanup the MetaMCP server. Wrapped so a throw here can't skip the
+    // downstream mcp-server-pool cleanup and bookkeeping below, which would
+    // otherwise orphan the real downstream connections/processes.
+    try {
+      await activeServer.cleanup();
+    } catch (error) {
+      logger.error(
+        `Error cleaning up MetaMCP server for session ${sessionId}:`,
+        error,
+      );
+    }
 
     // Also cleanup the corresponding MCP server pool session
     await mcpServerPool.cleanupSession(activeServer.internalSessionId);
@@ -549,6 +573,9 @@ export class MetaMcpServerPool {
 
     // Check if we already have an active server for this OpenAPI session
     if (this.activeServers[sessionId]) {
+      // Touch timestamp on every access so the configured lifetime acts as
+      // an idle timeout, not a hard TTL from creation (mirrors mcp-server-pool.ts).
+      this.sessionTimestamps[sessionId] = Date.now();
       return this.activeServers[sessionId];
     }
 

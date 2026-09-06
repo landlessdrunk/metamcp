@@ -45,8 +45,17 @@ const cleanupSession = async (sessionId: string, transport?: Transport) => {
 
     if (sessionTransport) {
       logger.info(`Closing transport for session ${sessionId}`);
-      await sessionTransport.close();
-      logger.info(`Transport cleaned up for session ${sessionId}`);
+      try {
+        await sessionTransport.close();
+        logger.info(`Transport cleaned up for session ${sessionId}`);
+      } catch (error) {
+        // Don't let a transport-close failure skip the downstream pool
+        // cleanup below — that's what actually releases connections/processes.
+        logger.error(
+          `Error closing transport for session ${sessionId}:`,
+          error,
+        );
+      }
     } else {
       logger.info(`No transport found for session ${sessionId}`);
     }
@@ -154,6 +163,7 @@ sseRouter.post(
         res.status(404).end("Session not found");
         return;
       }
+      metaMcpServerPool.touchSession(sessionId as string);
       await transport.handlePostMessage(req, res);
     } catch (error) {
       logger.error("Error in public endpoint /message route:", error);

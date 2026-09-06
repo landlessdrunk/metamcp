@@ -42,7 +42,13 @@ export class SessionLifetimeManagerImpl<
   }
 
   getSession(sessionId: string): T | undefined {
-    return this.sessions.get(sessionId);
+    const session = this.sessions.get(sessionId);
+    if (session) {
+      // Touch timestamp on every access so the configured lifetime acts as
+      // an idle timeout, not a hard TTL from creation.
+      this.sessionTimestamps.set(sessionId, Date.now());
+    }
+    return session;
   }
 
   getAllSessions(): Map<string, T> {

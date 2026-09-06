@@ -2,6 +2,16 @@ import { ConfigKey, ConfigKeyEnum } from "@repo/zod-types";
 
 import { configRepo } from "../db/repositories/config.repo";
 
+// Idle timeout applied to client-facing sessions (StreamableHTTP/SSE) and the
+// downstream connection pools when no SESSION_LIFETIME is explicitly
+// configured. Without a bound, a client that never sends a session-terminating
+// DELETE (e.g. a mobile app that gets backgrounded or force-quit) leaks its
+// session, MetaMCP server instance, and downstream connections/processes
+// forever. Operators who want the old infinite-session behavior can opt back
+// in with SESSION_LIFETIME=-1 (or by explicitly clearing it via the admin
+// config UI/tool, which still maps to infinite).
+const DEFAULT_SESSION_LIFETIME_MS = 30 * 60 * 1000; // 30 minutes
+
 export const configService = {
   async isSignupDisabled(): Promise<boolean> {
     const config = await configRepo.getConfig(
@@ -113,16 +123,18 @@ export const configService = {
       ConfigKeyEnum.enum.SESSION_LIFETIME,
     );
     if (!config?.value) {
-      // Fallback to env var (milliseconds), then null (infinite sessions)
+      // Fallback to env var (milliseconds), then the default idle timeout.
       const envLifetime = process.env.SESSION_LIFETIME;
       if (envLifetime) {
         const parsed = parseInt(envLifetime, 10);
-        return isNaN(parsed) ? null : parsed;
+        if (isNaN(parsed)) return DEFAULT_SESSION_LIFETIME_MS;
+        return parsed < 0 ? null : parsed; // negative = infinite (opt-out)
       }
-      return null;
+      return DEFAULT_SESSION_LIFETIME_MS;
     }
     const lifetime = parseInt(config.value, 10);
-    return isNaN(lifetime) ? null : lifetime;
+    if (isNaN(lifetime)) return DEFAULT_SESSION_LIFETIME_MS;
+    return lifetime < 0 ? null : lifetime; // negative = infinite (opt-out)
   },
 
   async setSessionLifetime(lifetime?: number | null): Promise<void> {

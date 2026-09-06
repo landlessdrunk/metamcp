@@ -78,8 +78,17 @@ const cleanupSession = async (
 
     if (sessionTransport) {
       logger.info(`Closing transport for session ${sessionId}`);
-      await sessionTransport.close();
-      logger.info(`Transport cleaned up for session ${sessionId}`);
+      try {
+        await sessionTransport.close();
+        logger.info(`Transport cleaned up for session ${sessionId}`);
+      } catch (error) {
+        // Don't let a transport-close failure skip the downstream pool
+        // cleanup below — that's what actually releases connections/processes.
+        logger.error(
+          `Error closing transport for session ${sessionId}:`,
+          error,
+        );
+      }
     } else {
       logger.info(`No transport found for session ${sessionId}`);
     }
@@ -141,6 +150,7 @@ streamableHttpRouter.get(
         return;
       } else {
         logger.info(`Found session ${sessionId}, handling request`);
+        metaMcpServerPool.touchSession(sessionId);
         normalizeStreamableHttpAcceptHeader(req);
         await transport.handleRequest(req, res);
       }
@@ -290,6 +300,7 @@ streamableHttpRouter.post(
           });
         } else {
           logger.info(`Found session ${sessionId}, handling request`);
+          metaMcpServerPool.touchSession(sessionId);
           normalizeStreamableHttpAcceptHeader(req);
           res.type("application/json");
           await transport.handleRequest(req, res);
