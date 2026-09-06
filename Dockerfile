@@ -90,14 +90,23 @@ COPY --from=builder --chown=nextjs:nodejs /app/package.json ./
 COPY --from=builder --chown=nextjs:nodejs /app/pnpm-workspace.yaml ./
 COPY --from=builder --chown=nextjs:nodejs /app/pnpm-lock.yaml ./
 
-# Install drizzle-kit locally in backend for migrations. This must run BEFORE
-# the --prod install below: node_modules was copied in from the builder stage
-# with dev+prod+optional deps installed, and `pnpm add` (no --prod flag)
-# wants that same full set. Running it after a --prod prune would conflict
-# with the already-pruned (prod-only) install state (ERR_PNPM_INCLUDED_DEPS_CONFLICT).
+# Install drizzle-kit locally in backend for migrations. It's already listed
+# under devDependencies in apps/backend/package.json (used at dev time for
+# `db:generate`/`db:migrate`), but the runtime entrypoint needs it too, and
+# `pnpm install --prod` below strips devDependencies entirely. `--save-prod`
+# forces it into "dependencies" so it survives that prune — without it, `pnpm
+# add` preserves a package's existing category (devDependencies here) instead
+# of moving it, and the binary silently disappears after the prod install.
+#
+# This must also run BEFORE the --prod install below: node_modules was copied
+# in from the builder stage with dev+prod+optional deps installed, and `pnpm
+# add` (no --prod flag) wants that same full set. Running it after a --prod
+# prune would conflict with the already-pruned (prod-only) install state
+# (ERR_PNPM_INCLUDED_DEPS_CONFLICT).
+#
 # CI=true tells pnpm it's non-interactive so it doesn't try to prompt before
 # modifying the existing node_modules — Docker builds have no TTY to answer that.
-RUN cd apps/backend && CI=true pnpm add drizzle-kit@0.31.1
+RUN cd apps/backend && CI=true pnpm add --save-prod drizzle-kit@0.31.1
 
 # Install production dependencies only (prunes devDependencies workspace-wide,
 # now that drizzle-kit — added as a regular dependency above — will survive it)
