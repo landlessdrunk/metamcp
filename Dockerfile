@@ -90,10 +90,13 @@ COPY --from=builder --chown=nextjs:nodejs /app/package.json ./
 COPY --from=builder --chown=nextjs:nodejs /app/pnpm-workspace.yaml ./
 
 # Install production dependencies only
-RUN pnpm install --prod
+# CI=true tells pnpm it's non-interactive so it doesn't try to prompt before
+# pruning the existing (dev-dep-filled, copied from the builder stage)
+# node_modules — Docker builds have no TTY to answer that prompt.
+RUN CI=true pnpm install --prod
 
 # Install drizzle-kit locally in backend for migrations
-RUN cd apps/backend && pnpm add drizzle-kit@0.31.1
+RUN cd apps/backend && CI=true pnpm add drizzle-kit@0.31.1
 
 # Copy startup script
 COPY --chown=nextjs:nodejs docker-entrypoint.sh ./
