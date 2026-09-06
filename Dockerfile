@@ -48,9 +48,12 @@ COPY . .
 # Build all packages and apps
 RUN pnpm build
 
-RUN sed -i -e "s/30000/600000/" \
-    "node_modules/.pnpm/next@15.5.12_react-dom@19.1.2_react@19.1.2__react@19.1.2/node_modules/next/dist/server/lib/router-utils/proxy-request.js" \
-    "node_modules/.pnpm/next@15.5.12_react-dom@19.1.2_react@19.1.2__react@19.1.2/node_modules/next/dist/esm/server/lib/router-utils/proxy-request.js"
+# Locate proxy-request.js by path instead of hardcoding the pnpm virtual-store
+# directory name (e.g. next@15.5.12_react-dom@19.1.2_react@19.1.2__react@19.1.2)
+# — that name encodes the exact resolved peer-dependency versions and breaks
+# on any lockfile drift (e.g. a react/react-dom patch bump within semver range).
+RUN find node_modules/.pnpm -type f -name proxy-request.js -path "*/router-utils/*" \
+    | xargs -r sed -i -e "s/30000/600000/"
 
 # Production runner stage
 FROM base AS runner
