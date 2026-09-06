@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y \
     gnupg \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y nodejs \
-    && npm install -g pnpm@10.12.0 \
+    && npm install -g pnpm@10.29.3 \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -88,15 +88,20 @@ COPY --from=builder --chown=nextjs:nodejs /app/packages ./packages
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules ./node_modules
 COPY --from=builder --chown=nextjs:nodejs /app/package.json ./
 COPY --from=builder --chown=nextjs:nodejs /app/pnpm-workspace.yaml ./
+COPY --from=builder --chown=nextjs:nodejs /app/pnpm-lock.yaml ./
 
-# Install production dependencies only
+# Install drizzle-kit locally in backend for migrations. This must run BEFORE
+# the --prod install below: node_modules was copied in from the builder stage
+# with dev+prod+optional deps installed, and `pnpm add` (no --prod flag)
+# wants that same full set. Running it after a --prod prune would conflict
+# with the already-pruned (prod-only) install state (ERR_PNPM_INCLUDED_DEPS_CONFLICT).
 # CI=true tells pnpm it's non-interactive so it doesn't try to prompt before
-# pruning the existing (dev-dep-filled, copied from the builder stage)
-# node_modules — Docker builds have no TTY to answer that prompt.
-RUN CI=true pnpm install --prod
-
-# Install drizzle-kit locally in backend for migrations
+# modifying the existing node_modules — Docker builds have no TTY to answer that.
 RUN cd apps/backend && CI=true pnpm add drizzle-kit@0.31.1
+
+# Install production dependencies only (prunes devDependencies workspace-wide,
+# now that drizzle-kit — added as a regular dependency above — will survive it)
+RUN CI=true pnpm install --prod
 
 # Copy startup script
 COPY --chown=nextjs:nodejs docker-entrypoint.sh ./
