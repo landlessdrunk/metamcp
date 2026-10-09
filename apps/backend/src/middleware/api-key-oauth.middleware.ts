@@ -24,14 +24,12 @@ const apiKeysRepository = new ApiKeysRepository();
 
 /**
  * Helper function to get the correct base URL from request
- * Prioritizes APP_URL environment variable, then checks proxy headers
+ *
+ * Prefers the request's own host over the fixed APP_URL - see the matching
+ * getBaseUrl() in routers/oauth/utils.ts for why. Kept as a separate copy
+ * here since that's how this file already had it (not imported from utils).
  */
 function getBaseUrl(req: express.Request): string {
-  // Prioritize APP_URL environment variable
-  if (process.env.APP_URL) {
-    return process.env.APP_URL;
-  }
-
   // Check for forwarded headers from Next.js proxy
   const forwardedHost = req.headers["x-forwarded-host"] as string;
   const forwardedProto = req.headers["x-forwarded-proto"] as string;
@@ -41,8 +39,19 @@ function getBaseUrl(req: express.Request): string {
     return `${protocol}://${forwardedHost}`;
   }
 
-  // Fallback to request host
-  return `${req.protocol}://${req.get("host")}`;
+  const hostHeader = req.get("host");
+  if (hostHeader) {
+    return `${req.protocol}://${hostHeader}`;
+  }
+
+  // Fall back to the configured APP_URL if the request has no host info.
+  if (process.env.APP_URL) {
+    return process.env.APP_URL;
+  }
+
+  throw new Error(
+    "Unable to determine base URL: request has no host header and APP_URL is not set",
+  );
 }
 
 /**

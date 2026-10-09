@@ -137,14 +137,15 @@ export function verifyClientSecret(
 
 /**
  * Helper function to get the correct base URL from request
- * Prioritizes APP_URL environment variable, then checks proxy headers
+ *
+ * Prefers the request's own host so OAuth metadata (resource/issuer) and
+ * redirect/session URLs match whichever address (LAN IP, VPN overlay IP,
+ * public domain, ...) the client actually used to reach this server - a
+ * fixed APP_URL can't satisfy RFC 9728 resource-matching for more than one
+ * address at a time. Falls back to APP_URL only when the request carries
+ * no host info at all.
  */
 export function getBaseUrl(req: express.Request): string {
-  // Prioritize APP_URL environment variable
-  if (process.env.APP_URL) {
-    return process.env.APP_URL;
-  }
-
   // Check for forwarded headers from Next.js proxy
   const forwardedHost = req.headers["x-forwarded-host"] as string;
   const forwardedProto = req.headers["x-forwarded-proto"] as string;
@@ -154,8 +155,19 @@ export function getBaseUrl(req: express.Request): string {
     return `${protocol}://${forwardedHost}`;
   }
 
-  // Fallback to request host
-  return `${req.protocol}://${req.get("host")}`;
+  const hostHeader = req.get("host");
+  if (hostHeader) {
+    return `${req.protocol}://${hostHeader}`;
+  }
+
+  // Fall back to the configured APP_URL if the request has no host info.
+  if (process.env.APP_URL) {
+    return process.env.APP_URL;
+  }
+
+  throw new Error(
+    "Unable to determine base URL: request has no host header and APP_URL is not set",
+  );
 }
 
 /**
