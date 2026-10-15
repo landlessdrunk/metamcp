@@ -56,7 +56,7 @@ import {
   createToolOverridesListToolsMiddleware,
   mapOverrideNameToOriginal,
 } from "./metamcp-middleware/tool-overrides.functional";
-import { isBackendSessionLostError } from "./session-error";
+import { isRecoverableBackendError } from "./session-error";
 import { parseToolName } from "./tool-name-parser";
 import { toolsSyncCache } from "./tools-sync-cache";
 import { sanitizeName } from "./utils";
@@ -584,7 +584,11 @@ export const createServer = async (
     try {
       return (await callOnce(clientForTool)) as CallToolResult;
     } catch (error) {
-      if (!isBackendSessionLostError(error)) {
+      // Covers both backend "Session not found" (HTTP 404) and the SDK's
+      // local "Not connected" (cached client's transport already closed).
+      // Both are rejected before the request reaches the backend, so a
+      // single replay can't double-execute the tool.
+      if (!isRecoverableBackendError(error)) {
         logger.error(
           `Error calling tool "${name}" through ${
             clientForTool.client.getServerVersion()?.name || "unknown"
@@ -595,7 +599,7 @@ export const createServer = async (
       }
 
       logger.warn(
-        `Backend reported session lost for server ${serverUuid} on tool "${name}"; invalidating pool and retrying once.`,
+        `Backend session/transport lost for server ${serverUuid} on tool "${name}"; invalidating pool and retrying once.`,
       );
 
       await mcpServerPool.invalidateServerConnection(sessionId, serverUuid);

@@ -499,9 +499,20 @@ export class McpServerPool {
 
     let recycled = 0;
     let destroyed = 0;
+    let released = 0;
 
     // Try to recycle each connection back to idle pool
     for (const [serverUuid, client] of Object.entries(activeSession)) {
+      // At the per-server cap, getSession() hands the same ConnectedClient to
+      // several sessions. If another session still holds it, just drop this
+      // session's reference: destroying it would leave the other session
+      // with a closed transport ("Not connected"), and recycling it to idle
+      // would hand an in-use connection to yet another session.
+      if (this.isClientHeldByOtherSession(sessionId, serverUuid, client)) {
+        released++;
+        continue;
+      }
+
       if (!this.idleSessions[serverUuid]) {
         // No idle session for this server — recycle the connection
         this.idleSessions[serverUuid] = client;
@@ -533,8 +544,25 @@ export class McpServerPool {
     delete this.sessionToServers[sessionId];
 
     logger.info(
-      `Cleaned up session ${sessionId} (recycled: ${recycled}, destroyed: ${destroyed})`,
+      `Cleaned up session ${sessionId} (recycled: ${recycled}, destroyed: ${destroyed}, released shared: ${released})`,
     );
+  }
+
+  /**
+   * Whether a session other than `sessionId` still references this exact
+   * client for `serverUuid` (shared via per-server cap reuse).
+   */
+  private isClientHeldByOtherSession(
+    sessionId: string,
+    serverUuid: string,
+    client: ConnectedClient,
+  ): boolean {
+    for (const [sid, sessionServers] of Object.entries(this.activeSessions)) {
+      if (sid !== sessionId && sessionServers[serverUuid] === client) {
+        return true;
+      }
+    }
+    return false;
   }
 
   /**
